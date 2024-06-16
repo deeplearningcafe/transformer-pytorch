@@ -1,0 +1,7 @@
+weights/
+data/
+environment.yml
+log_output.csv
+micrograd.ipynb
+__pycache__/
+.ipynb_checkpoints/
