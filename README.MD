@@ -59,7 +59,7 @@ We use the BPE tokenizer, the same as the original paper. To train the tokenizer
 ### Train transformer
 To train the Transformer model, use the provided script:
    ```bash
-   python train_tokenizer.py
+   python training.py
    ```
 Here, `config.yaml` is a configuration file specifying the model parameters, training settings, and dataset paths. Parameter count becomes 56,754,176, while try to use the same configuration as in the paper.
    ```yalm
@@ -76,8 +76,8 @@ Here, `config.yaml` is a configuration file specifying the model parameters, tra
    warmup_steps: 4000
    max_length: 128
    device: cpu
-   train_batch: 4
-   eval_batch: 4
+   train_batch: 128
+   eval_batch: 128
    steps: 10
    val_steps: 1
    log_steps: 1

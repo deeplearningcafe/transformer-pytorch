@@ -8,6 +8,7 @@ from util.prepare_model import prepare_training
 import hydra
 from omegaconf import DictConfig
 import os
+from tqdm import tqdm
 
 np.random.seed(46)
 torch.manual_seed(46)
@@ -20,10 +21,11 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
     current_step = 0
     logs = []
     train_losses = 0
-    # val_losses = 0
+    val_losses = 0
     total_tokens = 0
     running_steps = 0
     print("Start training!")
+    pbar = tqdm(total=conf.train.steps)
     while current_step < conf.train.steps:
         start_time = time.time()
         for batch in train_loader:
@@ -62,38 +64,46 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
             optim.step()
             scheduler.step()
 
-            if current_step % conf.train.log_steps == 0:
-                # we want the loss per step so we divide by the num of steps that have been accumulated
-                train_losses /= running_steps
-                print(f"Step {current_step}  || Train Loss : {train_losses} || Step Time: {time.time()-start_time} || Learning rate: {scheduler.get_lr()[0]} || Norm: {norm} || Trained Tokens: {total_tokens}")
-                start_time = time.time()
-                running_steps = 0
+
                 
             if current_step % conf.train.val_steps == 0:
                 with torch.no_grad():
                     for batch in val_loader:
                         batch = {k: v.to(conf.train.device) for k, v in batch.items()}
                         outputs, loss_val = model(batch["en"]["input_ids"], batch["de"]["input_ids"], batch["en"]["attention_mask"], batch["de"]["attention_mask"])
-                        # val_losses += loss_val.item()
-                    
-                    # val_losses /= conf.train.val_steps
-                    print(f"Validation Step {current_step}: {torch.mean(loss_val)}")
-                                # ログを保存
-                    log_epoch = {'step': current_step+1, 'train_loss': train_losses, 'val_loss': torch.mean(loss_val),
-                                  "gradient_norm": norm, "trained_tokens": total_tokens,
-                                  "learning_rate": scheduler.get_lr()[0]}
-                    logs.append(log_epoch)
-                    df = pd.DataFrame(logs)
-                    df.to_csv("log_output.csv")
-                    train_losses = 0
-                    # val_losses = 0
+                        val_losses += loss_val.item()
+
+            if current_step % conf.train.log_steps == 0:
+                # we want the loss per step so we divide by the num of steps that have been accumulated
+                train_losses /= running_steps
+                val_losses /= len(val_loader)
+
+                print(f"Step {current_step}  || Train Loss : {train_losses} || Validation Loss : {val_losses} || Step Time: {time.time()-start_time} || Learning rate: {scheduler.get_lr()[0]} || Norm: {norm} || Trained Tokens: {total_tokens}")
+                start_time = time.time()
+                running_steps = 0
+
+                # val_losses /= conf.train.val_steps
+                # print(f"Validation Step {current_step}: {torch.mean(loss_val)}")
+                            # ログを保存
+                log_epoch = {'step': current_step+1, 'train_loss': train_losses, 'val_loss': val_losses,
+                                "gradient_norm": norm, "trained_tokens": total_tokens,
+                                "learning_rate": scheduler.get_lr()[0]}
+                logs.append(log_epoch)
+                df = pd.DataFrame(logs)
+                df.to_csv("log_output.csv")
+                train_losses = 0
+                val_losses = 0
             
             if current_step % conf.train.save_steps == 0 or current_step == conf.train.steps-1:
                 print("Saving")
-                torch.save(model.state_dict(), conf.train.save_path + "transformer_" + 
+                sd = model.state_dict()
+
+                del sd['lm_head.weight']
+                torch.save(sd, conf.train.save_path + "transformer_" + 
                        str(current_step+1) + '.pth')
             
             current_step += 1
+            pbar.update(1)
             if current_step >= conf.train.steps:
                 break
         

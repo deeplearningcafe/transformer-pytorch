@@ -11,8 +11,8 @@ train:
   warmup_steps: 4000
   max_length: 128
   device: cpu
-  train_batch: 4
-  eval_batch: 4
+  train_batch: 8
+  eval_batch: 8
   steps: 10
   val_steps: 4
   log_steps: 4
