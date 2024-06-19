@@ -11,12 +11,12 @@ def weights_init(m):
     if isinstance(m, nn.Linear):
         # init.xavier_normal_(m.weight.data)
         # 512 is the hidden_dim
-        init.normal_(m.weight.data, mean=0, std=torch.sqrt(2/5*512))
+        init.normal_(m.weight.data, mean=0, std=torch.sqrt(2/(5*512)))
         if m.bias is not None:  # バイアス項がある場合
             nn.init.constant_(m.bias, 0.0)
 
 def apply_weights_init(model, conf):
-    std = math.sqrt(2/5*conf.transformer.hidden_dim)
+    std = math.sqrt(2/(5*conf.transformer.hidden_dim))
     for name, param in model.named_parameters():
         if param.requires_grad:
             if 'gamma' in name.split('.') or 'beta' in name.split('.'):
@@ -46,7 +46,7 @@ def create_model(conf, apply_init:bool=True):
     # vocab 37000 tokens, batch 25000 tokens per batch
     # optimizer: adam, beta1=0.9, beta2=0.98, e=10**-9. 
     # Learning rate: lrate= hidden_dim**-0.5 * min(step_num**-0.5, step_num * warmup_steps**-1.5) with warmup_steps=4000
-    tokenizer = PreTrainedTokenizerFast(tokenizer_file=r"".join(conf.train.tokenizer_path), bos_token="<bos>", eos_token="<eos>",
+    tokenizer = PreTrainedTokenizerFast(tokenizer_file=r"".join(conf.tokenizer.tokenizer_path), bos_token="<bos>", eos_token="<eos>",
                 pad_token="<pad>", unk_token="<unk>")
     bos = tokenizer.bos_token
     eos = tokenizer.eos_token
@@ -58,15 +58,14 @@ def create_model(conf, apply_init:bool=True):
         ],
     )
 
-    conf.transformer.vocabulary_size = tokenizer.vocab_size + 1
+    # conf.transformer.vocabulary_size = tokenizer.vocab_size + 1
     model = transformer(conf)
-    model.set_tied_embeddings()
     if apply_init:
         # model.apply(weights_init)
         apply_weights_init(model, conf)
+        model.set_tied_embeddings()
         
     model = model.to(conf.train.device)
-    model.train()
     return model, tokenizer
 
 def create_optim(conf, model):
@@ -85,6 +84,7 @@ def create_optim(conf, model):
 
 def prepare_training(conf):
     model, tokenizer = create_model(conf)
+    model.train()
     print("Model loaded")
     optim, scheduler = create_optim(conf, model)
     print("Optim loaded")
@@ -97,6 +97,7 @@ def prepare_test(conf):
                          map_location={'cuda:0': 'cpu'})
 
     model.load_state_dict(net_weights)
+    # tied embeddings after loading the weights
     model.set_tied_embeddings()
     model.eval()
     return model, tokenizer

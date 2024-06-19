@@ -20,8 +20,9 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
     current_step = 0
     logs = []
     train_losses = 0
-    val_losses = 0
+    # val_losses = 0
     total_tokens = 0
+    running_steps = 0
     print("Start training!")
     while current_step < conf.train.steps:
         start_time = time.time()
@@ -35,16 +36,24 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
             
             train_losses += loss_train.item()
             total_tokens += batch["en"]["input_ids"].shape[-1] + batch["de"]["input_ids"].shape[-1]
-            
+            running_steps += 1
+
             optim.zero_grad()
             loss_train.backward()
             
             # print last layer gradients
-            current_grad = []
-            for p in model.decoder.layers[0].msha.parameters():
-                if p.grad is not None:
-                    current_grad.append(p.grad.detach().flatten())
-            norm = torch.cat(current_grad).norm()
+            # current_grad = []
+            # for p in model.decoder.layers[0].msha.parameters():
+            #     if p.grad is not None:
+            #         current_grad.append(p.grad.detach().flatten())
+            # norm = torch.cat(current_grad).norm()
+            grads = [
+                param.grad.detach().flatten()
+                for param in model.parameters()
+                if param.grad is not None
+            ]
+            norm = torch.cat(grads).norm()
+
 
             # 勾配が大きくなりすぎると計算が不安定になるので、clipで最大でも勾配2.0に留める
             # nn.utils.clip_grad_value_(
@@ -54,30 +63,34 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
             scheduler.step()
 
             if current_step % conf.train.log_steps == 0:
-                print(f"Step {current_step}  || Train Loss : {train_losses} || Val Loss : {val_losses} || Step Time: {time.time()-start_time} || Learning rate: {scheduler.get_lr()} || Norm: {norm} || Trained Tokens: {total_tokens}")
+                # we want the loss per step so we divide by the num of steps that have been accumulated
+                train_losses /= running_steps
+                print(f"Step {current_step}  || Train Loss : {train_losses} || Step Time: {time.time()-start_time} || Learning rate: {scheduler.get_lr()[0]} || Norm: {norm} || Trained Tokens: {total_tokens}")
                 start_time = time.time()
-        
+                running_steps = 0
+                
             if current_step % conf.train.val_steps == 0:
                 with torch.no_grad():
                     for batch in val_loader:
                         batch = {k: v.to(conf.train.device) for k, v in batch.items()}
                         outputs, loss_val = model(batch["en"]["input_ids"], batch["de"]["input_ids"], batch["en"]["attention_mask"], batch["de"]["attention_mask"])
-                        val_losses += loss_val.item()
-                        
+                        # val_losses += loss_val.item()
+                    
+                    # val_losses /= conf.train.val_steps
                     print(f"Validation Step {current_step}: {torch.mean(loss_val)}")
                                 # ログを保存
-                    log_epoch = {'step': current_step+1, 'train_loss': train_losses, 'val_loss': val_losses,
-                                  "norm_msha_decoder_first_layer": norm, "trained_tokens": total_tokens,
-                                  "learning_rate": scheduler.get_lr()}
+                    log_epoch = {'step': current_step+1, 'train_loss': train_losses, 'val_loss': torch.mean(loss_val),
+                                  "gradient_norm": norm, "trained_tokens": total_tokens,
+                                  "learning_rate": scheduler.get_lr()[0]}
                     logs.append(log_epoch)
                     df = pd.DataFrame(logs)
                     df.to_csv("log_output.csv")
                     train_losses = 0
-                    val_losses = 0
+                    # val_losses = 0
             
             if current_step % conf.train.save_steps == 0 or current_step == conf.train.steps-1:
                 print("Saving")
-                torch.save(model.state_dict(), conf.train.save_path +
+                torch.save(model.state_dict(), conf.train.save_path + "transformer_" + 
                        str(current_step+1) + '.pth')
             
             current_step += 1
@@ -93,7 +106,7 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
 def main(conf: DictConfig):
 
     model, tokenizer, optim, scheduler = prepare_training(conf)
-    train_loader, val_loader = prepare_data("bentrevett/multi30k", tokenizer, conf)
+    train_loader, val_loader = prepare_data(tokenizer, conf)
     if os.path.isdir(conf.train.save_path) == False:
         os.makedirs(conf.train.save_path)
     train(model, train_loader, val_loader, optim, scheduler, conf)

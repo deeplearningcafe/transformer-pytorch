@@ -15,7 +15,7 @@ class embeddings(nn.Module):
         super(embeddings, self).__init__()
 
         self.hidden_dim = conf.transformer.hidden_dim
-        self.vocabulary_size = conf.transformer.vocabulary_size
+        self.vocabulary_size = conf.tokenizer.vocabulary_size
 
         self.weights = nn.Embedding(self.vocabulary_size, self.hidden_dim, padding_idx=3)
 
@@ -295,7 +295,7 @@ class transformer(nn.Module):
         self.embeddings = embeddings(conf)
         self.pos_embeddings = positional_encoding(conf)
         self.hidden_dim = conf.transformer.hidden_dim
-        self.vocabulary_size = conf.transformer.vocabulary_size
+        self.vocabulary_size = conf.tokenizer.vocabulary_size
         
         # During training, we employed label smoothing of value 𝜖𝑙⁢𝑠=0.1
         self.label_smoothing = conf.transformer.label_smoothing

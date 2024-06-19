@@ -6,21 +6,27 @@ transformer:
   num_layers: 6
   dropout: 0.1
   label_smoothing: 0.1
-  vocabulary_size: 37000
 
 train:
   warmup_steps: 4000
   max_length: 128
-  tokenizer_path: C:\Users\victo\Documents\DataScience\python\papers_implementation\transformer-pytorch\data\tokenizer.json
   device: cpu
   train_batch: 4
   eval_batch: 4
   steps: 10
-  val_steps: 1
-  log_steps: 1
-  save_steps: 1
+  val_steps: 4
+  log_steps: 4
+  save_steps: 4
   use_bitsandbytes: False
-  save_path: weights/transformer_
+  save_path: weights/
+  dataset_name: "bentrevett/multi30k"
 
 inference:
-  checkpoint:
+  checkpoint: CHECKPOINT-PATH
+
+tokenizer:
+  tokenizer_path: data\tokenizer.json
+  vocabulary_size: 37000
+  special_tokens: ["<unk>", "<bos>", "<eos>", "<pad>"]
+  unk_token: <unk>
+  save_path: data
