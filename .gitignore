@@ -5,3 +5,5 @@ log_output.csv
 micrograd.ipynb
 __pycache__/
 .ipynb_checkpoints/
+compare_speeds.py
+outputs

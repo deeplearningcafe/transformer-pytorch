@@ -4,24 +4,31 @@ from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace
 import datasets
 import numpy as np
+import os
 np.random.seed(1234)
 
-tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
+tokenizer = Tokenizer(BPE(unk_token="<unk>"))
 tokenizer.pre_tokenizer = Whitespace()
 
-trainer = BpeTrainer(special_tokens=["[UNK]", "[START]", "[END]", "[PAD]"], vocab_size=37000)
+trainer = BpeTrainer(special_tokens=["<unk>", "<bos>", "<eos>", "<pad>"], vocab_size=37000)
 
-data = datasets.load_dataset("wmt/wmt14", data_dir="de-en")
+data = datasets.load_dataset("bentrevett/multi30k", split="train")
 
-print(data['train'])
+print(data)
 
-def dataset_iter():
-    for item in data['train']:
-        num = np.random.randint(0, 2)
-        if num == 0:
-            yield item['translation']["en"]
+def dataset_iter(sampling:bool=False):
+    for item in data:
+        if sampling:
+            num = np.random.randint(0, 2)
+            if num == 0:
+                yield item["en"]
+            else:
+                yield item["de"]
         else:
-            yield item['translation']["de"]
+            yield item["en"] + " " + item["de"]
 
-tokenizer.train_from_iterator(dataset_iter(), trainer)
-tokenizer.save('data/tokenizer.json')
+tokenizer.train_from_iterator(dataset_iter(False), trainer)
+save_dir = "data"
+if not os.path.isdir(save_dir):
+    os.makedirs(save_dir)
+tokenizer.save(f'{save_dir}/tokenizer.json')
