@@ -79,7 +79,7 @@ def main(conf: DictConfig):
 
     stop_tokens = [tokenizer.eos_token_id, tokenizer.pad_token_id]
     outputs_tokens, outputs_array = generate(model, inputs, bos_token=tokenizer.bos_token_id, stop_tokens=stop_tokens)
-    print(tokenizer.decode(outputs_tokens[0], skip_special_tokens=True))
+    print(tokenizer.decode(outputs_tokens[0], skip_special_tokens=False))
 
     print("*"*50)
     debug_inference(model, inputs, target_tokens)

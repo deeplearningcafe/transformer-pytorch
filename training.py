@@ -29,14 +29,15 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
     if conf.train.epochs == 0:
         epochs = conf.train.steps / len(train_loader)
         pbar = tqdm(total=conf.train.steps)
+        steps = conf.train.steps
 
     elif conf.train.steps == 0:
         steps = conf.train.epochs * len(train_loader)
         pbar = tqdm(total=conf.train.epochs)
-
+        epochs = conf.train.epochs
+        
     print("Start training!")
     print(f"Total Epochs {epochs} || Total steps {steps}")
-    start_time = time.time()
 
     while current_epoch < epochs:
         for batch in train_loader:
@@ -88,11 +89,11 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
                 # we want the loss per step so we divide by the num of steps that have been accumulated
                 train_losses /= running_steps
                 val_losses /= len(val_loader)
+                max_norm = max(grad_norms)
                 grad_norms /= running_steps
 
-                print(f"Step {current_step}  || Train Loss : {train_losses} || Validation Loss : {val_losses} || Step Time: {time.time()-start_time} || Learning rate: {scheduler.get_lr()[0]} || Norm: {grad_norms}" # || Trained Tokens: {total_tokens}"
+                print(f"Step {current_step}  || Train Loss : {train_losses} || Validation Loss : {val_losses} || Learning rate: {scheduler.get_lr()[0]} || Norm: {grad_norms} || Max Norm: {max_norm}" # || Trained Tokens: {total_tokens}"
                       )
-                start_time = time.time()
                 running_steps = 0
 
                 log_epoch = {'step': current_step+1, 'train_loss': train_losses, 'val_loss': val_losses,
@@ -125,7 +126,7 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
             
     print("End Training")
 
-def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig):
+def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_log:bool=True):
     batch = {k: v.to(conf.train.device) for k, v in batch.items()}
     losses = []
     grad_norms = []
@@ -164,23 +165,47 @@ def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig):
             break
 
 
-    log_epoch = {'losses': losses, "gradient_norm": grad_norms, "learning_rate": lrs}
-    df = pd.DataFrame(log_epoch)
-    df.to_csv("test.csv", index=False)
+    logs = {'losses': losses, "gradient_norm": grad_norms, "learning_rate": lrs}
+    if output_log:
+        df = pd.DataFrame(logs)
+        df.to_csv("log_overfitting.csv", index=False)
+    return logs
 
+def grid_search(batch, conf: DictConfig):
+    warmup_list = np.arange(200, 601, step=50)
+    warmup_logs = logs = {'losses': [], "gradient_norm": [], "learning_rate": [], "warmup": []}
+    for warmup in warmup_list:
+        print(f"Evaluating warmup steps: {warmup}")
+        conf.train.warmup_steps = int(warmup)
+        model, tokenizer, optim, scheduler = prepare_training(conf)
+        logs = overfit_one_batch(model, batch, optim, scheduler, conf, False)
+        # warmup_logs.append(logs)
+        # add the warmup as a column
+        logs["warmup"] = [warmup] * len(logs["losses"])
+        # update the new logs
+        for key in warmup_logs.keys():
+            warmup_logs[key].extend(logs[key])
+        
+    df = pd.DataFrame(warmup_logs)
+    df.to_csv("hp_search.csv", index=False)
 
 @hydra.main(version_base=None, config_path=".", config_name="config")
 def main(conf: DictConfig):
     model, tokenizer, optim, scheduler = prepare_training(conf)
     train_loader, val_loader = prepare_data(tokenizer, conf)
-    if not conf.overfit_one_batch.overfit:
+    
+    if conf.overfit_one_batch.hp_search:
+        batch = next(iter(train_loader))
+        grid_search(batch, conf)
+    elif conf.overfit_one_batch.overfit:
+        batch = next(iter(train_loader))
+        overfit_one_batch(model, batch, optim, scheduler, conf, True)
+
+    else:
         if os.path.isdir(conf.train.save_path) == False:
             os.makedirs(conf.train.save_path)
         train(model, train_loader, val_loader, optim, scheduler, conf)
         # train(model, train_loader, val_loader, optim, scheduler, steps=10, val_steps=10, log_steps=10, save_steps=10)
-    else:
-        batch = next(iter(train_loader))
-        overfit_one_batch(model, batch, optim, scheduler, conf)
 
 if __name__ == "__main__":
     main()

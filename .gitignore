@@ -7,3 +7,4 @@ __pycache__/
 .ipynb_checkpoints/
 compare_speeds.py
 outputs
+*.csv

@@ -23,10 +23,10 @@ train:
   dataset_name: "bentrevett/multi30k"
 
 inference:
-  checkpoint: C:\Users\victo\Documents\DataScience\python\papers_implementation\transformer-pytorch\weights\transformer_2001.pth
+  checkpoint: CHECKPOINT
 
 tokenizer:
-  tokenizer_path: C:\Users\victo\Documents\DataScience\python\papers_implementation\transformer-pytorch\data\tokenizer.json
+  tokenizer_path: TOKENIZER-PATH
   vocabulary_size: 37000
   special_tokens: ["<unk>", "<bos>", "<eos>", "<pad>"]
   unk_token: <unk>
@@ -36,3 +36,4 @@ overfit_one_batch:
   tolerance: 1e-4
   max_steps: 15
   overfit: True
+  hp_search: True
