@@ -11,9 +11,10 @@ train:
   warmup_steps: 4000
   max_length: 128
   device: cpu
-  train_batch: 8
+  train_batch: 16
   eval_batch: 8
   steps: 10
+  epochs: 0
   val_steps: 4
   log_steps: 4
   save_steps: 4
@@ -22,11 +23,16 @@ train:
   dataset_name: "bentrevett/multi30k"
 
 inference:
-  checkpoint: CHECKPOINT-PATH
+  checkpoint: C:\Users\victo\Documents\DataScience\python\papers_implementation\transformer-pytorch\weights\transformer_2001.pth
 
 tokenizer:
-  tokenizer_path: data\tokenizer.json
+  tokenizer_path: C:\Users\victo\Documents\DataScience\python\papers_implementation\transformer-pytorch\data\tokenizer.json
   vocabulary_size: 37000
   special_tokens: ["<unk>", "<bos>", "<eos>", "<pad>"]
   unk_token: <unk>
   save_path: data
+
+overfit_one_batch:
+  tolerance: 1e-4
+  max_steps: 15
+  overfit: True

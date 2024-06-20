@@ -18,7 +18,7 @@ def generate(model, inputs:torch.tensor, bos_token:int=None, stop_tokens:list[in
     for i in range(len(outputs_array)):
         gap = 0
         for j in range(i, len(outputs_array)):
-            gap += abs(outputs_array[i] - outputs_array[j])
+            gap += torch.sum(torch.abs(outputs_array[0][i] - outputs_array[0][j]))/outputs_array.shape[-1]
         diffs.append(gap)
         
     print(f"Difference between outputs {diffs}")
@@ -44,8 +44,8 @@ def debug_inference(model, inputs:torch.tensor, target_tokens:torch.tensor):
         for i in range(len(last_hidden_states)):
             gap = 0
             for j in range(len(last_hidden_states)):
-                if j == i:
-                    gap += abs(last_hidden_states[i] - last_hidden_states[j])
+                if j != i:
+                    gap += torch.sum(torch.abs(last_hidden_states[0][i] - last_hidden_states[0][j]))/last_hidden_states.shape[-1]
             diffs.append(gap)
             
         print(f"Difference between each hidden state: {diffs}")
@@ -54,15 +54,15 @@ def debug_inference(model, inputs:torch.tensor, target_tokens:torch.tensor):
         for i in range(len(attentions_array)):
             gap = 0
             for j in range(len(attentions_array)):
-                if j == i:
-                    gap += abs(attentions_array[i] - attentions_array[j])
+                if j != i:
+                    gap += torch.sum(torch.abs(attentions_array[i][0][0] - attentions_array[j][0][0]))/attentions_array[0][0][0].shape[-1]
             diffs.append(torch.sum(gap))
             
         print(f"Difference between each attention layer: {diffs}")
         print(attentions_array[0][0].shape)
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="config")
+@hydra.main(version_base=None, config_path=".", config_name="config")
 def main(conf: DictConfig):
 
     model, tokenizer = prepare_test(conf)

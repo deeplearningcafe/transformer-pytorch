@@ -40,7 +40,7 @@ def prepare_data(tokenizer=None, conf: omegaconf.DictConfig=None):
 def prepare_test_data(tokenizer=None, conf: omegaconf.DictConfig=None):
     test = datasets.load_dataset(conf.train.dataset_name, split="test")
     test_loader = DataLoader(test, batch_size=16, collate_fn=lambda batch: collate_fn(batch, tokenizer, conf), )
-    eval = datasets.load_dataset(conf.train.dataset_name, split="test")
+    eval = datasets.load_dataset(conf.train.dataset_name, split="validation")
     eval_loader = DataLoader(eval, batch_size=16, collate_fn=lambda batch: collate_fn(batch, tokenizer, conf), )
 
     return test_loader, eval_loader
