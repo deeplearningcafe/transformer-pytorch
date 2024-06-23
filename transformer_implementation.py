@@ -142,7 +142,7 @@ class feed_forward(nn.Module):
 
         self.activation = nn.ReLU(inplace=True)
 
-    def forward(self, x:torch.tensor) -> torch.tensor:
+    def forward(self, x:torch.tensor, output_activation_state:bool=False) -> torch.tensor:
         """Forward method of the feed forward class, the hidden dim increases and the decreases to the normal hidden_dim
 
         Args:
@@ -151,12 +151,14 @@ class feed_forward(nn.Module):
         Returns:
             torch.tensor: [batch_size, num_heads, seq_length, head_dim]
         """
-        x = self.activation(self.input_projection(x))
+        x_activation = self.activation(self.input_projection(x))
 
         # the include dropout before the last output_projection
-        x = self.dropout(x)
+        x = self.dropout(x_activation)
         x = self.output_projection(x)
         
+        if output_activation_state:
+            return x, x_activation
         return x
 
 class layer_norm(nn.Module):
@@ -211,30 +213,33 @@ class decoder_block(nn.Module):
         
         self.dropout = nn.Dropout(p=conf.transformer.dropout)
         
-    def forward(self, x:torch.tensor, attention_mask=None, context=None, context_mask=None, output_attentions:bool=False) -> torch.tensor:
+    def forward(self, x:torch.tensor, attention_mask=None, context=None, context_mask=None, output_attentions:bool=False, output_activation_state:bool=False) -> torch.tensor:
         # masked self attention, so here we need to use the causal_attention_mask
         if output_attentions:
             hidden_states, attentions = self.msha(x, attention_mask, None, output_attentions=output_attentions)
             hidden_states = self.dropout(hidden_states)
         else:
             hidden_states = self.dropout(self.msha(x, attention_mask, None, output_attentions=output_attentions))
-        x_1 = self.layernorm1(x + hidden_states)
+        x = self.layernorm1(x + hidden_states)
 
         # cross attention, here it is not masked so we can use the normal attention mask
         if context != None:
-            hidden_states = self.dropout(self.msha(x_1, context_mask, context))
+            hidden_states = self.dropout(self.msha(x, context_mask, context))
             x = self.layernorm2(x + hidden_states)
         
-        # there is a difference between them so the msha is working
-        # print(f"Diff between first msha and cross attention in decoder layer: {abs(x_1-x)}")
         
-        hidden_states = self.dropout(self.ff(x))
+        if output_activation_state:
+            hidden_states, activation_state = self.ff(x, output_activation_state=output_activation_state)
+            hidden_states = self.dropout(hidden_states)
+        else:
+            hidden_states = self.dropout(self.ff(x, output_activation_state=output_activation_state))
+
         x = self.layernorm3(x + hidden_states)
         
-        # the difference exists
-        # print(f"Diff between first msha and ff in decoder layer: {abs(x_1-x)}")
-        if output_attentions:
-            return x, attentions
+        if output_attentions and output_activation_state:
+            return x, attentions, activation_state
+        elif output_attentions:
+            return x, attentions,
         return x
     
 class encoder(nn.Module):
@@ -265,23 +270,29 @@ class decoder(nn.Module):
         for i in range(self.num_layers):
             self.layers.append(decoder_block(conf))
             
-    def set_embeddings_weigths(self, embeddings):
-        self.embeddings.weights.weight = embeddings.weights.weight
         
-    def forward(self, hidden_states:torch.tensor, attention_mask=None, context=None, context_mask=None, output_attentions:bool=False) -> torch.tensor:
+    def forward(self, hidden_states:torch.tensor, attention_mask=None, context=None, context_mask=None, output_attentions:bool=False, output_activation_state:bool=False) -> torch.tensor:
         # the input is the encoder output, as we will be creating the output in a loop, first token is [EOS]
         
         if output_attentions:
             attentions_array = []
+        if output_activation_state:
+            activations_array = []
         
         for i in range(len(self.layers)):
-            if output_attentions:
-                hidden_states, attentions = self.layers[i](hidden_states, attention_mask, context, context_mask, output_attentions=output_attentions)
+            if output_attentions and output_activation_state:
+                hidden_states, attentions, activation_state = self.layers[i](hidden_states, attention_mask, context, context_mask, output_attentions=output_attentions, output_activation_state=output_activation_state)
+                attentions_array.append(attentions)
+                activations_array.append(activation_state)
+            elif output_attentions:
+                hidden_states, attentions = self.layers[i](hidden_states, attention_mask, context, context_mask, output_attentions=output_attentions, output_activation_state=output_activation_state)
                 attentions_array.append(attentions)
             else:
                 hidden_states = self.layers[i](hidden_states, attention_mask, context, context_mask, output_attentions=output_attentions)
 
-        if output_attentions:
+        if output_attentions and output_activation_state:
+            return hidden_states, attentions_array, activations_array
+        elif output_attentions:
             return hidden_states, attentions_array
         return hidden_states
 
@@ -327,14 +338,13 @@ class transformer(nn.Module):
         return combined_mask
     
     def set_tied_embeddings(self):
-        # self.decoder.set_embeddings_weigths(self.embeddings)
         # the output embeddings layer, is the LM Head, a linear with input hidden_dim and output vocab_size
         self.lm_head = nn.Linear(in_features=self.hidden_dim, out_features=self.vocabulary_size, bias=False)
 
         self.lm_head.weight = self.embeddings.weights.weight
     
-    def forward(self, src_input_ids:torch.tensor,  tgt_input_ids:torch.tensor, src_attention_mask=None, tgt_attention_mask=None, last_hidden_states:bool=False, output_attentions:bool=False):
-        # we need 3 masks and their padding masks, encoder_mask: [seq_len, seq_len], decoder_mask: [target_len, target_len]
+    def forward(self, src_input_ids:torch.tensor,  tgt_input_ids:torch.tensor, src_attention_mask=None, tgt_attention_mask=None, last_hidden_states:bool=False, output_attentions:bool=False, output_activation_state:bool=False):
+        # we need 2 masks and their padding masks, encoder_mask: [seq_len, seq_len], decoder_mask: [target_len, target_len]
         # context_mask: [seq_len, target_len] this is not masked so it can see everything
         hidden_states = self.embeddings(src_input_ids)
         hidden_states = self.pos_embeddings(hidden_states)
@@ -344,25 +354,21 @@ class transformer(nn.Module):
         if len(src_attention_mask.shape) == 2:
             attention_mask = src_attention_mask.unsqueeze(1).unsqueeze(1)
         attention_mask = (1-attention_mask) * torch.finfo(dtype).min
-        # print(f"Attention mask for the encoder: {attention_mask}")
         # encoder
         hidden_states = self.encoder(hidden_states, attention_mask)
         
-        # batch_size, context_length = input_ids.shape
-        # causal_attention_mask = self.make_causal_mask(input_ids_shape=(batch_size, max_tokens), dtype=dtype, context_length=context_length)
         causal_attention_mask = self.create_causal_mask_with_padding_mult(tgt_attention_mask.shape[1], tgt_attention_mask, device=tgt_input_ids.device)
-        # print(f"Attention mask for the decoder: {causal_attention_mask[0][0][-3:]}")
 
         # decoder
-        # cross attention mask, is the encoder mask, as we have QxK: [batch_size, query_seq_len, key_seq_len] and the attention mask is [1, 1, key_seq_len]
-        # cross_attention_mask = torch.cat(src_attention_mask, tgt_attention_mask)
         tgt_hidden_states = self.embeddings(tgt_input_ids)
         tgt_hidden_states = self.pos_embeddings(tgt_hidden_states)
         
-        if output_attentions:
-            hidden_states, attentions_array = self.decoder(tgt_hidden_states, causal_attention_mask, hidden_states, attention_mask, output_attentions=output_attentions)
+        if output_attentions and output_activation_state:
+            hidden_states, attentions_array, activations_array = self.decoder(tgt_hidden_states, causal_attention_mask, hidden_states, attention_mask, output_attentions=output_attentions, output_activation_state=output_activation_state)
+        elif output_attentions:
+            hidden_states, attentions_array = self.decoder(tgt_hidden_states, causal_attention_mask, hidden_states, attention_mask, output_attentions=output_attentions, output_activation_state=output_activation_state)
         else:
-            hidden_states = self.decoder(tgt_hidden_states, causal_attention_mask, hidden_states, attention_mask, output_attentions=output_attentions)
+            hidden_states = self.decoder(tgt_hidden_states, causal_attention_mask, hidden_states, attention_mask, output_attentions=output_attentions, output_activation_state=output_activation_state)
         
         logits = self.lm_head(hidden_states)
         
@@ -372,8 +378,6 @@ class transformer(nn.Module):
         # as we are using the causal mask, we don't need to shift the input_ids before computing  
         labels = tgt_input_ids[:, 1:].contiguous()
         shifted_logits = logits[..., :, :-1, :].contiguous()
-        # print(labels)
-        # print(shifted_logits.shape)
         
         # we need to have only 2 dimensions for the crossentropy, so shifted_logits: [batch_size * seq_length, vocab_size] and labels: [batch_size * seq_length]
         shifted_logits = shifted_logits.view(-1, self.vocabulary_size)
@@ -381,7 +385,9 @@ class transformer(nn.Module):
         loss = criterion(shifted_logits, labels)
         
         if last_hidden_states:
-            if output_attentions:
+            if output_attentions and output_activation_state:
+                return logits, loss, hidden_states, attentions_array, activations_array
+            elif output_attentions:
                 return logits, loss, hidden_states, attentions_array
             else:
                 return logits, loss, hidden_states

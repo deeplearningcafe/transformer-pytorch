@@ -29,7 +29,7 @@ def generate(model, inputs:torch.tensor, bos_token:int=None, stop_tokens:list[in
 def debug_inference(model, inputs:torch.tensor, target_tokens:torch.tensor):
     with torch.no_grad():
 
-        logits, loss, last_hidden_states, attentions_array = model(inputs["input_ids"], target_tokens["input_ids"], inputs["attention_mask"], target_tokens["attention_mask"], last_hidden_states=True, output_attentions=True)
+        logits, loss, last_hidden_states, attentions_array, activations_array = model(inputs["input_ids"], target_tokens["input_ids"], inputs["attention_mask"], target_tokens["attention_mask"], last_hidden_states=True, output_attentions=True, output_activation_state=True)
         print(loss)
         print(logits.shape)
         for i in range(logits.shape[1]):
@@ -60,6 +60,8 @@ def debug_inference(model, inputs:torch.tensor, target_tokens:torch.tensor):
             
         print(f"Difference between each attention layer: {diffs}")
         print(attentions_array[0][0].shape)
+
+        print(activations_array[0])
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")

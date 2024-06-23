@@ -56,6 +56,12 @@ We use the BPE tokenizer, the same as the original paper. To train the tokenizer
    python train_tokenizer.py
    ```
 
+### Hyperparameter search
+In the case of using a dataset that is different from the original `WMT 2014 English-to-German` dataset, the warmup steps should be changed. By overfitting in a single batch, we can test several warmup values. To run it just change the `hp_search` variable to True inside the `config.yaml` file, the tolerance, max steps and search interval can be changed.
+   ```bash
+   python training.py
+   ```
+
 ### Train transformer
 To train the Transformer model, use the provided script:
    ```bash

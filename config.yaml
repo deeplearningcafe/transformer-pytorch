@@ -23,7 +23,7 @@ train:
   dataset_name: "bentrevett/multi30k"
 
 inference:
-  checkpoint: CHECKPOINT
+  checkpoint: CHECKPOINT-PATH
 
 tokenizer:
   tokenizer_path: TOKENIZER-PATH
@@ -36,4 +36,6 @@ overfit_one_batch:
   tolerance: 1e-4
   max_steps: 15
   overfit: True
-  hp_search: True
+  hp_search: False
+  min_warmup: 200
+  max_warmup: 500

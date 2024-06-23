@@ -4,7 +4,7 @@ import torch.nn as nn
 import numpy as np
 import pandas as pd
 from util.prepara_data import prepare_data
-from util.prepare_model import prepare_training
+from util.prepare_model import prepare_training, get_update_ratio
 import hydra
 from omegaconf import DictConfig
 import os
@@ -126,7 +126,7 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
             
     print("End Training")
 
-def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_log:bool=True):
+def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_log:bool=True, save_update_ratio:bool=False):
     batch = {k: v.to(conf.train.device) for k, v in batch.items()}
     losses = []
     grad_norms = []
@@ -134,6 +134,14 @@ def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_l
     logs = []
     lrs = []
     pbar = tqdm(total=conf.overfit_one_batch.max_steps)
+    if save_update_ratio:
+        diffs = {"embeddings": []}
+        # we just going to look to the lm and the last layer of the decoder
+        # tmp_decoder_msha = model.decoder.layers[-1].msha.output_projection.weight.detach().cpu().clone()
+        # tmp_decoder_ff = model.decoder.layers[-1].ff.input_projection.weight.detach().cpu().clone()
+        layers = {"embeddings":model.lm_head.weight.detach().cpu().clone(),}
+
+    # print(layers, diffs)
     print("Start overfitting in one batch!")
     while current_step < conf.overfit_one_batch.max_steps:
         outputs, loss_train = model(batch["en"]["input_ids"], batch["de"]["input_ids"], batch["en"]["attention_mask"], batch["de"]["attention_mask"])
@@ -159,6 +167,9 @@ def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_l
         optim.step()
         scheduler.step()
 
+        # update the change ratio
+        layers, diffs = get_update_ratio(model, layers, diffs)
+        # print(diffs)
         current_step += 1
         pbar.update(1)
         if current_step > 1 and abs(losses[-2]-losses[-1]) < conf.overfit_one_batch.tolerance:
@@ -169,10 +180,12 @@ def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_l
     if output_log:
         df = pd.DataFrame(logs)
         df.to_csv("log_overfitting.csv", index=False)
+    if save_update_ratio:
+        return logs, diffs
     return logs
 
 def grid_search(batch, conf: DictConfig):
-    warmup_list = np.arange(200, 601, step=50)
+    warmup_list = np.arange(conf.overfit_one_batch.min_warmup, conf.overfit_one_batch.max_warmup+1, step=50)
     warmup_logs = logs = {'losses': [], "gradient_norm": [], "learning_rate": [], "warmup": []}
     for warmup in warmup_list:
         print(f"Evaluating warmup steps: {warmup}")
@@ -199,7 +212,7 @@ def main(conf: DictConfig):
         grid_search(batch, conf)
     elif conf.overfit_one_batch.overfit:
         batch = next(iter(train_loader))
-        overfit_one_batch(model, batch, optim, scheduler, conf, True)
+        overfit_one_batch(model, batch, optim, scheduler, conf, output_log=True, save_update_ratio=True)
 
     else:
         if os.path.isdir(conf.train.save_path) == False:

@@ -102,3 +102,19 @@ def prepare_test(conf):
     model.eval()
     return model, tokenizer
 
+def get_update_ratio(model, layers:dict[str, torch.tensor], diffs: dict[str, list]):
+    # we have the layers dict that stores the weights and the diffs dict that stores a list with the diff in each step
+    # dict are not in place so we need to create a new one
+    tmp_dict = {}
+
+    # the idea is to 
+    for key, layer in layers.items():
+        for name, param in model.named_parameters():
+            # print(key)
+            if key in name.split('.'):
+                with torch.no_grad():
+                    change = param-layer
+                    # print(change.std()/param.std())
+                    diffs[key].append((change.std()/param.std()).log10().item())
+                    tmp_dict[key] = param.detach().cpu().clone()
+    return tmp_dict, diffs
