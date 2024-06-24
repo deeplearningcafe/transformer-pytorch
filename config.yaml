@@ -9,33 +9,35 @@ transformer:
 
 train:
   warmup_steps: 4000
-  max_length: 128
-  device: cpu
-  train_batch: 16
-  eval_batch: 8
-  steps: 10
+  max_length: 64
+  device: cuda
+  train_batch: 96
+  eval_batch: 64
+  steps: 500
   epochs: 0
   val_steps: 4
   log_steps: 4
   save_steps: 4
-  use_bitsandbytes: False
+  use_bitsandbytes: True
+  scheduler_type: "warmup-consine"
+  lr: 2e-3
   save_path: weights/
   dataset_name: "bentrevett/multi30k"
 
 inference:
-  checkpoint: CHECKPOINT-PATH
+  checkpoint: PATH
 
 tokenizer:
-  tokenizer_path: TOKENIZER-PATH
+  tokenizer_path: PATH
   vocabulary_size: 37000
   special_tokens: ["<unk>", "<bos>", "<eos>", "<pad>"]
   unk_token: <unk>
   save_path: data
 
 overfit_one_batch:
-  tolerance: 1e-4
-  max_steps: 15
+  tolerance: 1e-5
+  max_steps: 250
   overfit: True
-  hp_search: False
+  hp_search: True
   min_warmup: 200
   max_warmup: 500

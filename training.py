@@ -1,5 +1,4 @@
 import torch
-import time
 import torch.nn as nn
 import numpy as np
 import pandas as pd
@@ -9,6 +8,7 @@ import hydra
 from omegaconf import DictConfig
 import os
 from tqdm import tqdm
+from datetime import datetime
 
 np.random.seed(46)
 torch.manual_seed(46)
@@ -23,7 +23,7 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
     logs = []
     train_losses = 0
     val_losses = 0
-    grad_norms = 0
+    grad_norms = []
     # total_tokens = 0
     running_steps = 0
     if conf.train.epochs == 0:
@@ -67,7 +67,7 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
                 if param.grad is not None
             ]
             norm = torch.cat(grads).norm()
-            grad_norms += norm.item()
+            grad_norms.append(norm.item())
 
             # 勾配が大きくなりすぎると計算が不安定になるので、clipで最大でも勾配2.0に留める
             # nn.utils.clip_grad_value_(
@@ -90,21 +90,22 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
                 train_losses /= running_steps
                 val_losses /= len(val_loader)
                 max_norm = max(grad_norms)
-                grad_norms /= running_steps
+                mean_norm = sum(grad_norms)/running_steps
 
-                print(f"Step {current_step}  || Train Loss : {train_losses} || Validation Loss : {val_losses} || Learning rate: {scheduler.get_lr()[0]} || Norm: {grad_norms} || Max Norm: {max_norm}" # || Trained Tokens: {total_tokens}"
+                print(f"Step {current_step}  || Train Loss : {train_losses} || Validation Loss : {val_losses} || Learning rate: {scheduler.state_dict()['_last_lr'][0]} || Mean Norm: {mean_norm} || Max Norm: {max_norm}" # || Trained Tokens: {total_tokens}"
                       )
                 running_steps = 0
 
                 log_epoch = {'step': current_step+1, 'train_loss': train_losses, 'val_loss': val_losses,
-                                "gradient_norm": grad_norms, #"trained_tokens": total_tokens,
-                                "learning_rate": scheduler.get_lr()[0]}
+                                "mean_norm": mean_norm, "max_norm": max_norm,
+                                "learning_rate": scheduler.state_dict()['_last_lr'][0]}
                 logs.append(log_epoch)
                 df = pd.DataFrame(logs)
                 df.to_csv("log_output.csv", index=False)
                 train_losses = 0
                 val_losses = 0
-                grad_norms = 0
+                del grad_norms
+                grad_norms = []
             
             if current_step % conf.train.save_steps == 0 or current_step == steps-1:
                 print("Saving")
@@ -116,7 +117,7 @@ def train(model, train_loader, val_loader, optim, scheduler, conf: DictConfig):
                        str(current_step+1) + '.pth')
             
             current_step += 1
-            current_epoch
+            
             pbar.update(1)
             if current_step >= steps:
                 break
@@ -158,7 +159,7 @@ def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_l
         ]
         norm = torch.cat(grads).norm()
         grad_norms.append(norm.item())
-        lrs.append(scheduler.get_lr()[0])
+        lrs.append(scheduler.state_dict()['_last_lr'][0])
 
         # 勾配が大きくなりすぎると計算が不安定になるので、clipで最大でも勾配2.0に留める
         # nn.utils.clip_grad_value_(
@@ -167,8 +168,9 @@ def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_l
         optim.step()
         scheduler.step()
 
-        # update the change ratio
-        layers, diffs = get_update_ratio(model, layers, diffs)
+        if save_update_ratio:
+            # update the change ratio
+            layers, diffs = get_update_ratio(model, layers, diffs)
         # print(diffs)
         current_step += 1
         pbar.update(1)
@@ -185,22 +187,62 @@ def overfit_one_batch(model, batch, optim, scheduler, conf: DictConfig, output_l
     return logs
 
 def grid_search(batch, conf: DictConfig):
-    warmup_list = np.arange(conf.overfit_one_batch.min_warmup, conf.overfit_one_batch.max_warmup+1, step=50)
-    warmup_logs = logs = {'losses': [], "gradient_norm": [], "learning_rate": [], "warmup": []}
-    for warmup in warmup_list:
-        print(f"Evaluating warmup steps: {warmup}")
-        conf.train.warmup_steps = int(warmup)
-        model, tokenizer, optim, scheduler = prepare_training(conf)
-        logs = overfit_one_batch(model, batch, optim, scheduler, conf, False)
-        # warmup_logs.append(logs)
-        # add the warmup as a column
-        logs["warmup"] = [warmup] * len(logs["losses"])
-        # update the new logs
-        for key in warmup_logs.keys():
-            warmup_logs[key].extend(logs[key])
+    logs = {'losses': [], "gradient_norm": [], "learning_rate": []}
+    parameters = ["warmup"]
+
+    # if conf.train.conf.train.scheduler_type == "original":
+    #     warmup_list = np.arange(conf.overfit_one_batch.min_warmup, conf.overfit_one_batch.max_warmup+1, step=50)
+
+    # elif conf.train.conf.train.scheduler_type == "warmup-consine":
+    param_list = []
+    warmup_list = [5*factor for factor in range(1, 6)]
+    lr_list = [1e-2, 1e-3, 5e-3, 1e-4]
+    # warmup_list = [20]
+    # lr_list = [2e-3]
+    for i in range(len(warmup_list)):
+        for j in range(len(lr_list)):
+            warmup_steps = int(conf.train.steps*(warmup_list[i]/100))
+            param_list.append([warmup_steps, lr_list[j]])
+    parameters.append("max_lr")
         
-    df = pd.DataFrame(warmup_logs)
-    df.to_csv("hp_search.csv", index=False)
+    for param in parameters:
+        logs[param] = []
+        
+    for param in param_list:
+        conf.train.warmup_steps = int(param[0])
+        text = f"Evaluating warmup steps: {conf.train.warmup_steps}"
+
+        if len(param) == 2:
+            conf.train.lr = param[1]
+            text += f" and max_lr of {conf.train.lr}"
+        print(text)
+        
+        model, tokenizer, optim, scheduler = prepare_training(conf)
+        logs_one_comb = overfit_one_batch(model, batch, optim, scheduler, conf, False)
+        logs_one_comb["warmup"] = [int(param[0])] * len(logs_one_comb["losses"])
+        if len(param) == 2:
+            logs_one_comb["max_lr"] = [param[1]] * len(logs_one_comb["losses"])
+
+        for key in logs_one_comb.keys():
+            logs[key].extend(logs_one_comb[key])
+        
+    df = pd.DataFrame(logs)
+    df.to_csv(f"hp_search_{datetime.now().strftime(r'%Y%m%d-%H%M%S')}.csv", index=False)     
+    
+    # for warmup in warmup_list:
+    #     print(f"Evaluating warmup steps: {warmup}")
+    #     conf.train.warmup_steps = int(warmup)
+    #     model, tokenizer, optim, scheduler = prepare_training(conf)
+    #     logs = overfit_one_batch(model, batch, optim, scheduler, conf, False)
+    #     # warmup_logs.append(logs)
+    #     # add the warmup as a column
+    #     logs["warmup"] = [warmup] * len(logs["losses"])
+    #     # update the new logs
+    #     for key in warmup_logs.keys():
+    #         warmup_logs[key].extend(logs[key])
+        
+    # df = pd.DataFrame(warmup_logs)
+    # df.to_csv("hp_search.csv", index=False)
 
 @hydra.main(version_base=None, config_path=".", config_name="config")
 def main(conf: DictConfig):

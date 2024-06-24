@@ -6,6 +6,7 @@ from transformer_implementation import transformer
 from tokenizers.processors import TemplateProcessing
 import torch
 import math
+import omegaconf
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
@@ -15,7 +16,7 @@ def weights_init(m):
         if m.bias is not None:  # バイアス項がある場合
             nn.init.constant_(m.bias, 0.0)
 
-def apply_weights_init(model, conf):
+def apply_weights_init(model, conf: omegaconf.DictConfig):
     std = math.sqrt(2/(5*conf.transformer.hidden_dim))
     for name, param in model.named_parameters():
         if param.requires_grad:
@@ -42,7 +43,7 @@ class transformer_scheduler(LRScheduler):
         lr_rate = self.hidden_dim**(-0.5) * min(self._step_count**(-0.5), self._step_count*self.warmup_steps**(-1.5))
         return [lr_rate for base_lr in self.base_lrs]
     
-def create_model(conf, apply_init:bool=True):
+def create_model(conf: omegaconf.DictConfig, apply_init:bool=True):
     # vocab 37000 tokens, batch 25000 tokens per batch
     # optimizer: adam, beta1=0.9, beta2=0.98, e=10**-9. 
     # Learning rate: lrate= hidden_dim**-0.5 * min(step_num**-0.5, step_num * warmup_steps**-1.5) with warmup_steps=4000
@@ -68,6 +69,23 @@ def create_model(conf, apply_init:bool=True):
     model = model.to(conf.train.device)
     return model, tokenizer
 
+def create_scheduler(optim:torch.optim.Optimizer, conf: omegaconf.DictConfig):
+    scheduler_type = conf.train.scheduler_type
+    if scheduler_type == "original":
+        scheduler = transformer_scheduler(optim, conf.transformer.hidden_dim, conf.train.warmup_steps)
+    elif scheduler_type == "warmup-consine":
+        scheduler_warmup = torch.optim.lr_scheduler.LinearLR(optim, start_factor=0.1, end_factor=1.0, total_iters=conf.train.warmup_steps)
+        scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=conf.train.steps, eta_min=conf.train.lr/1e3)
+        scheduler =  torch.optim.lr_scheduler.SequentialLR(optim, schedulers=[scheduler_warmup, scheduler_cosine], milestones=[conf.train.warmup_steps])
+    elif scheduler_type == "wsd":
+        scheduler_warmup = torch.optim.lr_scheduler.LinearLR(optim, start_factor=0.1, end_factor=1.0, total_iters=conf.train.warmup_steps)
+        scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=int(conf.train.steps*0.9), eta_min=conf.train.lr*1e-2)
+        # we end the cosine at lr*1e-3 so we start the dacay by a factor of that lr, if we max is 2e-3 then we start the decay at 2e-6
+        scheduler_decay = torch.optim.lr_scheduler.LinearLR(optim, start_factor=1e-3, end_factor=1e-4, total_iters=int(conf.train.steps*0.1))
+        scheduler =  torch.optim.lr_scheduler.SequentialLR(optim, schedulers=[scheduler_warmup, scheduler_cosine, scheduler_decay], 
+                                                           milestones=[conf.train.warmup_steps, int(conf.train.steps*0.9)-conf.train.warmup_steps])
+    return scheduler
+
 def create_optim(conf, model):
     if conf.train.use_bitsandbytes == True:
         try:
@@ -76,10 +94,11 @@ def create_optim(conf, model):
             raise ImportError(
                 "Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`"
             )
-        optim = bnb.optim.AdamW8bit(model.parameters(), betas=(0.9, 0.98), eps=1e-9)
+        optim = bnb.optim.AdamW8bit(model.parameters(), lr=conf.train.lr, betas=(0.9, 0.98), eps=1e-9)
     else:
-        optim = torch.optim.AdamW(model.parameters(), betas=(0.9, 0.98), eps=1e-9)
-    scheduler = transformer_scheduler(optim, conf.transformer.hidden_dim, conf.train.warmup_steps)
+        optim = torch.optim.AdamW(model.parameters(), lr=conf.train.lr, betas=(0.9, 0.98), eps=1e-9)
+    # scheduler = transformer_scheduler(optim, conf.transformer.hidden_dim, conf.train.warmup_steps)
+    scheduler = create_scheduler(optim, conf)
     return optim, scheduler
 
 def prepare_training(conf):
