@@ -79,11 +79,11 @@ def create_scheduler(optim:torch.optim.Optimizer, conf: omegaconf.DictConfig):
         scheduler =  torch.optim.lr_scheduler.SequentialLR(optim, schedulers=[scheduler_warmup, scheduler_cosine], milestones=[conf.train.warmup_steps])
     elif scheduler_type == "wsd":
         scheduler_warmup = torch.optim.lr_scheduler.LinearLR(optim, start_factor=0.1, end_factor=1.0, total_iters=conf.train.warmup_steps)
-        scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=int(conf.train.steps*0.9), eta_min=conf.train.lr*1e-2)
+        scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=int(conf.train.steps*0.9), eta_min=conf.train.lr*5e-2)
         # we end the cosine at lr*1e-3 so we start the dacay by a factor of that lr, if we max is 2e-3 then we start the decay at 2e-6
-        scheduler_decay = torch.optim.lr_scheduler.LinearLR(optim, start_factor=1e-3, end_factor=1e-4, total_iters=int(conf.train.steps*0.1))
+        scheduler_decay = torch.optim.lr_scheduler.LinearLR(optim, start_factor=5e-3, end_factor=2e-4, total_iters=int(conf.train.steps*0.15))
         scheduler =  torch.optim.lr_scheduler.SequentialLR(optim, schedulers=[scheduler_warmup, scheduler_cosine, scheduler_decay], 
-                                                           milestones=[conf.train.warmup_steps, int(conf.train.steps*0.9)-conf.train.warmup_steps])
+                                                           milestones=[conf.train.warmup_steps, int(conf.train.steps*0.85)])
     return scheduler
 
 def create_optim(conf, model):

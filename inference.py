@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from util.prepare_model import prepare_test
 import hydra
 from omegaconf import DictConfig
+import util.visualization
 
 np.random.seed(46)
 torch.manual_seed(46)
@@ -15,11 +16,11 @@ def generate(model, inputs:torch.tensor, bos_token:int=None, stop_tokens:list[in
     # print(tokenizer.decode(outputs_tokens[0], skip_special_tokens=True))
 
     diffs = []
-    for i in range(len(outputs_array)):
+    for i in range(outputs_array.shape[1]):
         gap = 0
-        for j in range(i, len(outputs_array)):
+        for j in range(i, outputs_array.shape[1]):
             gap += torch.sum(torch.abs(outputs_array[0][i] - outputs_array[0][j]))/outputs_array.shape[-1]
-        diffs.append(gap)
+        diffs.append(gap.item())
         
     print(f"Difference between outputs {diffs}")
     return outputs_tokens, outputs_array
@@ -27,46 +28,53 @@ def generate(model, inputs:torch.tensor, bos_token:int=None, stop_tokens:list[in
 
 
 def debug_inference(model, inputs:torch.tensor, target_tokens:torch.tensor):
-    with torch.no_grad():
-
-        logits, loss, last_hidden_states, attentions_array, activations_array = model(inputs["input_ids"], target_tokens["input_ids"], inputs["attention_mask"], target_tokens["attention_mask"], last_hidden_states=True, output_attentions=True, output_activation_state=True)
-        print(loss)
-        print(logits.shape)
-        for i in range(logits.shape[1]):
-            next_token_logits = logits[:, i, :]
-            topk_scores = torch.topk(next_token_logits, dim=-1, k=10)
-            indices_to_remove = next_token_logits < topk_scores[0][..., -1, None]
-            scores_processed = next_token_logits.masked_fill(indices_to_remove, torch.finfo(next_token_logits.dtype).min)
-            scores = F.softmax(scores_processed, dim=-1)
-            print(f"Scores of the token {i} : {torch.topk(scores, dim=-1, k=10)}")
+    model.train()
+    logits, loss, last_hidden_states, attentions_array, activations_array = model(inputs["input_ids"], target_tokens["input_ids"], inputs["attention_mask"], target_tokens["attention_mask"], last_hidden_states=True, output_attentions=True, output_activation_state=True)
+    print(loss)
+    loss.backward()
+    
+    # for i in range(10):
+    #     next_token_logits = logits[:, i, :]
+    #     topk_scores = torch.topk(next_token_logits, dim=-1, k=10)
+    #     indices_to_remove = next_token_logits < topk_scores[0][..., -1, None]
+    #     scores_processed = next_token_logits.masked_fill(indices_to_remove, torch.finfo(next_token_logits.dtype).min)
+    #     scores = F.softmax(scores_processed, dim=-1)
+    #     print(f"Scores of the token {i} : {torch.topk(scores, dim=-1, k=10)}")
+    
+    diffs = []
+    # for i in range(last_hidden_states.shape[1]):
+    gap = 0
+    for j in range(last_hidden_states.shape[1]):
+        if j != 0:
+            gap += torch.sum(torch.abs(last_hidden_states[0][0] - last_hidden_states[0][j]))/last_hidden_states.shape[-1]
+    diffs.append(gap.item())
+    print(f"Difference between each hidden state: {diffs}")
+    print("*"*50)
+    diffs = []
+    for i in range(len(attentions_array)):
+        gap = 0
+        for j in range(len(attentions_array)):
+            if j != i:
+                gap += torch.sum(torch.abs(attentions_array[i][0][0] - attentions_array[j][0][0]))/attentions_array[0][0][0].shape[-1]
+        diffs.append(torch.sum(gap).item())
         
-        diffs = []
-        for i in range(len(last_hidden_states)):
-            gap = 0
-            for j in range(len(last_hidden_states)):
-                if j != i:
-                    gap += torch.sum(torch.abs(last_hidden_states[0][i] - last_hidden_states[0][j]))/last_hidden_states.shape[-1]
-            diffs.append(gap)
-            
-        print(f"Difference between each hidden state: {diffs}")
-        print("*"*50)
-        diffs = []
-        for i in range(len(attentions_array)):
-            gap = 0
-            for j in range(len(attentions_array)):
-                if j != i:
-                    gap += torch.sum(torch.abs(attentions_array[i][0][0] - attentions_array[j][0][0]))/attentions_array[0][0][0].shape[-1]
-            diffs.append(torch.sum(gap))
-            
-        print(f"Difference between each attention layer: {diffs}")
-        print(attentions_array[0][0].shape)
-
-        print(activations_array[0])
-
+    print(f"Difference between each attention layer: {diffs}")
+    print("*"*50)
+    util.visualization.plot_activation_layer(activations_array)
+    print("*"*50)
+    layers = ["embeddings.weights.weight", "decoder.layers.5.msha.output_projection.weight",  "decoder.layers.3.msha.output_projection.weight",  "decoder.layers.0.msha.output_projection.weight", ]
+    util.visualization.plot_gradients(layers, model)
+    
+    print("*"*50)
+    layers = ["embeddings.weights.weight", "decoder.layers.5.ff.output_projection.weight", "decoder.layers.5.ff.input_projection.weight", "decoder.layers.0.ff.input_projection.weight", "decoder.layers.0.ff.output_projection.weight", ]
+    util.visualization.plot_gradients(layers, model)
+    print("*"*50)
+    util.visualization.plot_attention_map(attentions_array)
 
 @hydra.main(version_base=None, config_path=".", config_name="config")
 def main(conf: DictConfig):
-
+    conf.train.device = "cpu"
+    
     model, tokenizer = prepare_test(conf)
     print('ネットワーク設定完了：学習済みの重みをロードしました')
 
